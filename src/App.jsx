@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, MapPin, AlertCircle, CheckCircle, FileText, Map, Check, X } from 'lucide-react';
+import { Upload, MapPin, AlertCircle, CheckCircle, FileText, Map, Check, X, Navigation } from 'lucide-react';
 
 export default function App() {
   const [uploads, setUploads] = useState([]);
@@ -11,21 +11,20 @@ export default function App() {
   const [error, setError] = useState('');
   const [locationError, setLocationError] = useState('');
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [routeLoading, setRouteLoading] = useState(false);
   
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
-  const linesRef = useRef([]);
+  const routesRef = useRef([]);
 
   // Initialize Leaflet map
   useEffect(() => {
-    // Load Leaflet CSS
     const link = document.createElement('link');
     link.rel = 'stylesheet';
     link.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css';
     document.head.appendChild(link);
 
-    // Load Leaflet JS
     const script = document.createElement('script');
     script.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js';
     script.onload = () => {
@@ -43,104 +42,190 @@ export default function App() {
   const initializeMap = () => {
     if (!window.L || !mapRef.current || mapInstanceRef.current) return;
 
-    // Initialize map centered on India (default)
     const map = window.L.map(mapRef.current).setView([20.5937, 78.9629], 5);
 
-    // Add OpenStreetMap tiles (FREE - No API key required)
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
+      // attribution: '© OpenStreetMap contributors',
       maxZoom: 19,
     }).addTo(map);
 
     mapInstanceRef.current = map;
   };
 
-  // Update map with markers and lines
-  useEffect(() => {
-    if (!mapInstanceRef.current || !window.L) return;
-
-    // Clear existing markers and lines
-    markersRef.current.forEach(marker => marker.remove());
-    linesRef.current.forEach(line => line.remove());
-    markersRef.current = [];
-    linesRef.current = [];
-
-    if (uploads.length === 0) return;
-
-    // Add markers for each upload
-    uploads.forEach((upload, index) => {
-      const markerColor = upload.status === 'approved' ? 'green' : 'red';
+  // Fetch route from OSRM (OpenStreetMap Routing Machine) - FREE API
+  const fetchRoute = async (startLat, startLon, endLat, endLon) => {
+    try {
+      // OSRM Demo Server - FREE, no API key required
+      const url = `https://router.project-osrm.org/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson`;
       
-      const customIcon = window.L.divIcon({
-        className: 'custom-marker',
-        html: `<div style="
-          background-color: ${markerColor};
-          width: 30px;
-          height: 30px;
-          border-radius: 50%;
-          border: 3px solid white;
-          box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-weight: bold;
-          font-size: 14px;
-        ">${index + 1}</div>`,
-        iconSize: [30, 30],
-        iconAnchor: [15, 15],
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+        const coordinates = data.routes[0].geometry.coordinates;
+        // Convert from [lon, lat] to [lat, lon] for Leaflet
+        return coordinates.map(coord => [coord[1], coord[0]]);
+      }
+      return null;
+    } catch (error) {
+      console.error('Error fetching route:', error);
+      return null;
+    }
+  };
+
+  // Update map with markers and routes
+  useEffect(() => {
+    const updateMap = async () => {
+      if (!mapInstanceRef.current || !window.L) return;
+
+      // Clear existing markers and routes
+      markersRef.current.forEach(marker => marker.remove());
+      routesRef.current.forEach(route => route.remove());
+      markersRef.current = [];
+      routesRef.current = [];
+
+      if (uploads.length === 0) return;
+
+      // Add markers for each upload
+      uploads.forEach((upload, index) => {
+        const markerColor = upload.status === 'approved' ? '#10b981' : '#ef4444';
+        
+        const customIcon = window.L.divIcon({
+          className: 'custom-marker',
+          html: `<div style="
+            background-color: ${markerColor};
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 3px solid white;
+            box-shadow: 0 3px 8px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+          ">${index + 1}</div>`,
+          iconSize: [32, 32],
+          iconAnchor: [16, 16],
+        });
+
+        const marker = window.L.marker(
+          [upload.latitude, upload.longitude],
+          { icon: customIcon }
+        ).addTo(mapInstanceRef.current);
+
+        marker.bindPopup(`
+          <div style="min-width: 220px;">
+            <strong style="font-size: 16px; color: #1f2937;">Upload #${index + 1}</strong><br/>
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
+              <strong>File:</strong> ${upload.fileName}<br/>
+              <strong>Status:</strong> <span style="
+                color: white;
+                background-color: ${markerColor};
+                padding: 2px 8px;
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: bold;
+              ">${upload.status.toUpperCase()}</span><br/>
+              <strong>Time:</strong> ${new Date(upload.timestamp).toLocaleString()}<br/>
+              <strong>Coordinates:</strong><br/>
+              <code style="background: #f3f4f6; padding: 2px 4px; border-radius: 3px; font-size: 11px;">
+                ${upload.latitude.toFixed(6)}, ${upload.longitude.toFixed(6)}
+              </code>
+            </div>
+          </div>
+        `);
+
+        markersRef.current.push(marker);
       });
 
-      const marker = window.L.marker(
-        [upload.latitude, upload.longitude],
-        { icon: customIcon }
-      ).addTo(mapInstanceRef.current);
+      // Draw routes between consecutive uploads
+      setRouteLoading(true);
+      for (let i = 0; i < uploads.length - 1; i++) {
+        const start = uploads[i];
+        const end = uploads[i + 1];
+        
+        // Fetch actual road route
+        const routeCoordinates = await fetchRoute(
+          start.latitude,
+          start.longitude,
+          end.latitude,
+          end.longitude
+        );
 
-      marker.bindPopup(`
-        <div style="min-width: 200px;">
-          <strong>Upload #${index + 1}</strong><br/>
-          <strong>File:</strong> ${upload.fileName}<br/>
-          <strong>Status:</strong> <span style="color: ${markerColor};">${upload.status.toUpperCase()}</span><br/>
-          <strong>Time:</strong> ${new Date(upload.timestamp).toLocaleString()}<br/>
-          <strong>Coordinates:</strong><br/>
-          ${upload.latitude.toFixed(6)}, ${upload.longitude.toFixed(6)}
-        </div>
-      `);
+        if (routeCoordinates) {
+          const lineColor = end.status === 'approved' ? '#10b981' : '#ef4444';
+          
+          const route = window.L.polyline(routeCoordinates, {
+            color: lineColor,
+            weight: 5,
+            opacity: 0.8,
+            dashArray: end.status === 'approved' ? null : '10, 10',
+            lineJoin: 'round',
+            lineCap: 'round'
+          }).addTo(mapInstanceRef.current);
 
-      markersRef.current.push(marker);
-    });
+          // Add arrow decorator for direction
+          const decorator = window.L.polylineDecorator(route, {
+            patterns: [
+              {
+                offset: '50%',
+                repeat: 0,
+                symbol: window.L.Symbol.arrowHead({
+                  pixelSize: 12,
+                  polygon: false,
+                  pathOptions: {
+                    stroke: true,
+                    weight: 3,
+                    color: lineColor,
+                    opacity: 0.8
+                  }
+                })
+              }
+            ]
+          });
 
-    // Draw lines between consecutive uploads
-    for (let i = 0; i < uploads.length - 1; i++) {
-      const start = uploads[i];
-      const end = uploads[i + 1];
-      
-      const lineColor = end.status === 'approved' ? '#10b981' : '#ef4444';
-      
-      const line = window.L.polyline(
-        [
-          [start.latitude, start.longitude],
-          [end.latitude, end.longitude]
-        ],
-        {
-          color: lineColor,
-          weight: 4,
-          opacity: 0.7,
-          dashArray: end.status === 'approved' ? null : '10, 10'
+          routesRef.current.push(route);
+          
+          // Only add decorator if Leaflet Polyline Decorator is available
+          if (window.L.polylineDecorator) {
+            decorator.addTo(mapInstanceRef.current);
+            routesRef.current.push(decorator);
+          }
+        } else {
+          // Fallback to straight line if routing fails
+          const lineColor = end.status === 'approved' ? '#10b981' : '#ef4444';
+          
+          const fallbackLine = window.L.polyline(
+            [[start.latitude, start.longitude], [end.latitude, end.longitude]],
+            {
+              color: lineColor,
+              weight: 5,
+              opacity: 0.6,
+              dashArray: '15, 10'
+            }
+          ).addTo(mapInstanceRef.current);
+
+          routesRef.current.push(fallbackLine);
         }
-      ).addTo(mapInstanceRef.current);
+      }
+      setRouteLoading(false);
 
-      linesRef.current.push(line);
-    }
+      // Fit map bounds to show all markers with padding
+      if (uploads.length > 0) {
+        const bounds = uploads.map(u => [u.latitude, u.longitude]);
+        mapInstanceRef.current.fitBounds(bounds, { 
+          padding: [60, 60],
+          maxZoom: 15
+        });
+      }
+    };
 
-    // Fit map bounds to show all markers
-    if (uploads.length > 0) {
-      const bounds = uploads.map(u => [u.latitude, u.longitude]);
-      mapInstanceRef.current.fitBounds(bounds, { padding: [50, 50] });
-    }
+    updateMap();
   }, [uploads]);
 
-  // Calculate distance between two coordinates
+  // Calculate straight-line distance (Haversine formula)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371e3;
     const φ1 = (lat1 * Math.PI) / 180;
@@ -179,9 +264,30 @@ export default function App() {
         // Center map on current location
         if (mapInstanceRef.current) {
           mapInstanceRef.current.setView([coords.latitude, coords.longitude], 15);
+          
+          // Add temporary marker for current location
+          const tempMarker = window.L.marker([coords.latitude, coords.longitude], {
+            icon: window.L.divIcon({
+              className: 'current-location-marker',
+              html: `<div style="
+                background-color: #3b82f6;
+                width: 16px;
+                height: 16px;
+                border-radius: 50%;
+                border: 3px solid white;
+                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+                animation: pulse 2s infinite;
+              "></div>`,
+              iconSize: [16, 16],
+              iconAnchor: [8, 8],
+            })
+          }).addTo(mapInstanceRef.current);
+          
+          // Remove after 3 seconds
+          setTimeout(() => tempMarker.remove(), 3000);
         }
 
-        // Check distance if there are previous uploads
+        // Check distance from last upload (straight-line distance for validation)
         if (uploads.length > 0) {
           const lastUpload = uploads[uploads.length - 1];
           const dist = calculateDistance(
@@ -191,9 +297,11 @@ export default function App() {
             coords.longitude
           );
           setDistance(dist);
+          // Enforce 150-meter minimum distance rule
           setCanUpload(dist >= 150);
         } else {
           setCanUpload(true);
+          setDistance(null);
         }
       },
       (err) => {
@@ -223,7 +331,7 @@ export default function App() {
     }
   };
 
-  // Handle upload
+  // Handle upload with strict distance validation
   const handleUpload = () => {
     if (!selectedFile) {
       setError('Please select a file first');
@@ -235,8 +343,9 @@ export default function App() {
       return;
     }
 
+    // Strict validation: must be at least 150 meters away
     if (!canUpload) {
-      setError('You must be at least 150 meters away from your last upload location');
+      setError(`You must be at least 150 meters away from your last upload location. Current distance: ${distance?.toFixed(2)} meters`);
       return;
     }
 
@@ -286,11 +395,11 @@ export default function App() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="bg-white/20 p-3 rounded-lg">
-                  <Map className="w-6 h-6" />
+                  <Navigation className="w-6 h-6" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold">Location Upload Tracker</h1>
-                  <p className="text-sm text-blue-100">Track uploads with real-time mapping</p>
+                  <h1 className="text-2xl font-bold">Route-Based Upload Tracker</h1>
+                  <p className="text-sm text-blue-100">Track uploads with real road routing</p>
                 </div>
               </div>
               <button
@@ -341,9 +450,9 @@ export default function App() {
                 )}
               </div>
 
-              {/* Distance Check */}
+              {/* Distance Check with strict validation */}
               {distance !== null && (
-                <div className={`rounded-lg p-4 ${canUpload ? 'bg-green-50' : 'bg-red-50'}`}>
+                <div className={`rounded-lg p-4 ${canUpload ? 'bg-green-50 border-2 border-green-200' : 'bg-red-50 border-2 border-red-200'}`}>
                   <div className="flex items-center gap-2">
                     {canUpload ? (
                       <CheckCircle className="w-5 h-5 text-green-600" />
@@ -351,13 +460,22 @@ export default function App() {
                       <AlertCircle className="w-5 h-5 text-red-600" />
                     )}
                     <h3 className={`font-semibold ${canUpload ? 'text-green-700' : 'text-red-700'}`}>
-                      Distance Check
+                      Distance Validation
                     </h3>
                   </div>
-                  <p className={`text-sm mt-2 ${canUpload ? 'text-green-600' : 'text-red-600'}`}>
+                  <p className={`text-sm mt-2 font-medium ${canUpload ? 'text-green-600' : 'text-red-600'}`}>
                     {distance.toFixed(2)} meters from last upload
-                    {!canUpload && ` (Need ${(150 - distance).toFixed(2)} more meters)`}
                   </p>
+                  {!canUpload && (
+                    <p className="text-xs mt-1 text-red-600">
+                      ⚠️ Move {(150 - distance).toFixed(2)} more meters to upload
+                    </p>
+                  )}
+                  {canUpload && (
+                    <p className="text-xs mt-1 text-green-600">
+                      ✓ Distance requirement met! You can upload now.
+                    </p>
+                  )}
                 </div>
               )}
 
@@ -370,7 +488,7 @@ export default function App() {
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition-colors">
                     <div className="flex flex-col items-center">
                       <FileText className="w-8 h-8 text-gray-400 mb-2" />
-                      <p className="text-sm text-gray-600">
+                      <p className="text-sm text-gray-600 text-center">
                         {selectedFile ? selectedFile.name : 'Click to select a file'}
                       </p>
                       {selectedFile && (
@@ -413,6 +531,7 @@ export default function App() {
                   onClick={handleUpload}
                   disabled={!canUpload || !selectedFile || !currentLocation}
                   className="flex-1 bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  title={!canUpload && distance ? `Need ${(150 - distance).toFixed(2)} more meters` : ''}
                 >
                   <Upload className="w-5 h-5" />
                   Upload
@@ -476,45 +595,58 @@ export default function App() {
             {/* Right Panel - Map */}
             <div className="space-y-4">
               <div className="bg-gray-50 rounded-lg p-4">
-                <h3 className="font-semibold text-gray-700 mb-3 flex items-center gap-2">
-                  <Map className="w-4 h-4" />
-                  Upload Location Map
-                </h3>
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-semibold text-gray-700 flex items-center gap-2">
+                    <Navigation className="w-4 h-4" />
+                    Route Map
+                  </h3>
+                  {routeLoading && (
+                    <span className="text-xs text-blue-600 animate-pulse">Loading routes...</span>
+                  )}
+                </div>
                 <div 
                   ref={mapRef} 
                   className="w-full h-96 rounded-lg overflow-hidden border-2 border-gray-200"
                   style={{ minHeight: '400px' }}
                 />
-                <div className="mt-3 flex items-center gap-4 text-xs">
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                   <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 bg-red-500 rounded-full border-2 border-white"></div>
-                    <span className="text-gray-600">Pending</span>
+                    <div className="w-4 h-4 bg-red-500 rounded-full border-2 border-white shadow"></div>
+                    <span className="text-gray-600">Pending Upload</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-4 h-4 bg-green-500 rounded-full border-2 border-white"></div>
-                    <span className="text-gray-600">Approved</span>
+                    <div className="w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow"></div>
+                    <span className="text-gray-600">Approved Upload</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-0.5 bg-red-500"></div>
+                    <div className="w-8 h-1 bg-red-500" style={{borderStyle: 'dashed'}}></div>
                     <span className="text-gray-600">Pending Route</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <div className="w-8 h-0.5 bg-green-500"></div>
-                    <span className="text-gray-600">Completed Route</span>
+                    <div className="w-8 h-1 bg-green-500"></div>
+                    <span className="text-gray-600">Approved Route</span>
                   </div>
                 </div>
               </div>
 
               <div className="bg-blue-50 rounded-lg p-4">
                 <p className="text-xs text-blue-800">
-                  <strong>Map Features:</strong> Red markers = pending approval, Green markers = approved work. 
-                  Lines connect consecutive uploads. Dashed red = pending, Solid green = approved route.
+                  <strong>🗺️ Smart Routing:</strong> Routes follow actual roads using OpenStreetMap data. 
+                  Red dashed lines = pending approval. Solid green lines = approved work. 
+                  Strict 150m minimum distance enforced between uploads.
                 </p>
               </div>
             </div>
           </div>
         </div>
       </div>
+      
+      <style>{`
+        @keyframes pulse {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.2); opacity: 0.8; }
+        }
+      `}</style>
     </div>
   );
 }
