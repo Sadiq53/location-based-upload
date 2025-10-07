@@ -1,24 +1,29 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, MapPin, AlertCircle, CheckCircle, FileText, Map, Check, X, Navigation } from 'lucide-react';
+import { Upload, MapPin, AlertCircle, CheckCircle, FileText, Map, Check, X, Navigation, Image as ImageIcon, Eye, Download, ChevronLeft, ChevronRight } from 'lucide-react';
+
+const WORK_TYPES = ['Trenching', 'Ducting', 'Cable Pulling', 'Backfilling', 'Splicing'];
 
 export default function App() {
   const [uploads, setUploads] = useState([]);
   const [currentLocation, setCurrentLocation] = useState(null);
   const [distance, setDistance] = useState(null);
   const [canUpload, setCanUpload] = useState(true);
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [workType, setWorkType] = useState('Trenching');
+  const [remark, setRemark] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [locationError, setLocationError] = useState('');
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [viewingUpload, setViewingUpload] = useState(null);
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
   
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markersRef = useRef([]);
   const routesRef = useRef([]);
 
-  // Initialize Leaflet map
   useEffect(() => {
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -45,17 +50,15 @@ export default function App() {
     const map = window.L.map(mapRef.current).setView([20.5937, 78.9629], 5);
 
     window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      // attribution: '© OpenStreetMap contributors',
+      attribution: '© OpenStreetMap contributors',
       maxZoom: 19,
     }).addTo(map);
 
     mapInstanceRef.current = map;
   };
 
-  // Fetch route from OSRM (OpenStreetMap Routing Machine) - FREE API
   const fetchRoute = async (startLat, startLon, endLat, endLon) => {
     try {
-      // OSRM Demo Server - FREE, no API key required
       const url = `https://router.project-osrm.org/route/v1/driving/${startLon},${startLat};${endLon},${endLat}?overview=full&geometries=geojson`;
       
       const response = await fetch(url);
@@ -63,7 +66,6 @@ export default function App() {
       
       if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
         const coordinates = data.routes[0].geometry.coordinates;
-        // Convert from [lon, lat] to [lat, lon] for Leaflet
         return coordinates.map(coord => [coord[1], coord[0]]);
       }
       return null;
@@ -73,12 +75,10 @@ export default function App() {
     }
   };
 
-  // Update map with markers and routes
   useEffect(() => {
     const updateMap = async () => {
       if (!mapInstanceRef.current || !window.L) return;
 
-      // Clear existing markers and routes
       markersRef.current.forEach(marker => marker.remove());
       routesRef.current.forEach(route => route.remove());
       markersRef.current = [];
@@ -86,7 +86,6 @@ export default function App() {
 
       if (uploads.length === 0) return;
 
-      // Add markers for each upload
       uploads.forEach((upload, index) => {
         const markerColor = upload.status === 'approved' ? '#10b981' : '#ef4444';
         
@@ -115,38 +114,103 @@ export default function App() {
           { icon: customIcon }
         ).addTo(mapInstanceRef.current);
 
-        marker.bindPopup(`
-          <div style="min-width: 220px;">
-            <strong style="font-size: 16px; color: #1f2937;">Upload #${index + 1}</strong><br/>
-            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #e5e7eb;">
-              <strong>File:</strong> ${upload.fileName}<br/>
-              <strong>Status:</strong> <span style="
-                color: white;
-                background-color: ${markerColor};
-                padding: 2px 8px;
-                border-radius: 4px;
-                font-size: 11px;
-                font-weight: bold;
-              ">${upload.status.toUpperCase()}</span><br/>
-              <strong>Time:</strong> ${new Date(upload.timestamp).toLocaleString()}<br/>
-              <strong>Coordinates:</strong><br/>
-              <code style="background: #f3f4f6; padding: 2px 4px; border-radius: 3px; font-size: 11px;">
-                ${upload.latitude.toFixed(6)}, ${upload.longitude.toFixed(6)}
-              </code>
+        const popupContent = `
+          <div style="min-width: 250px; font-family: system-ui, -apple-system, sans-serif;">
+            <div style="font-size: 16px; font-weight: bold; color: #1f2937; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 2px solid #e5e7eb;">
+              Upload #${index + 1}
+            </div>
+            <div style="margin-top: 8px;">
+              <div style="margin-bottom: 6px;">
+                <strong style="color: #4b5563;">Work Type:</strong>
+                <span style="
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  color: white;
+                  padding: 2px 10px;
+                  border-radius: 12px;
+                  font-size: 11px;
+                  font-weight: 600;
+                  margin-left: 6px;
+                  display: inline-block;
+                ">${upload.workType}</span>
+              </div>
+              <div style="margin-bottom: 6px;">
+                <strong style="color: #4b5563;">Status:</strong>
+                <span style="
+                  color: white;
+                  background-color: ${markerColor};
+                  padding: 2px 10px;
+                  border-radius: 12px;
+                  font-size: 11px;
+                  font-weight: 600;
+                  margin-left: 6px;
+                  display: inline-block;
+                ">${upload.status.toUpperCase()}</span>
+              </div>
+              <div style="margin-bottom: 6px;">
+                <strong style="color: #4b5563;">Images:</strong>
+                <span style="color: #1f2937; margin-left: 4px;">${upload.files.length} file(s)</span>
+              </div>
+              <div style="margin-bottom: 6px;">
+                <strong style="color: #4b5563;">Time:</strong>
+                <span style="color: #6b7280; font-size: 12px; margin-left: 4px;">${new Date(upload.timestamp).toLocaleString()}</span>
+              </div>
+              <div style="margin-bottom: 8px;">
+                <strong style="color: #4b5563;">Location:</strong>
+                <div style="background: #f3f4f6; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #374151; margin-top: 2px; font-family: monospace;">
+                  ${upload.latitude.toFixed(6)}, ${upload.longitude.toFixed(6)}
+                </div>
+              </div>
+              <button 
+                onclick="window.viewUploadDetails(${index})"
+                style="
+                  width: 100%;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                  color: white;
+                  border: none;
+                  padding: 10px 16px;
+                  border-radius: 8px;
+                  font-weight: 600;
+                  font-size: 13px;
+                  cursor: pointer;
+                  transition: all 0.2s;
+                  box-shadow: 0 2px 4px rgba(102, 126, 234, 0.3);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  gap: 6px;
+                "
+                onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 4px 8px rgba(102, 126, 234, 0.4)'"
+                onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 4px rgba(102, 126, 234, 0.3)'"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                View Details
+              </button>
             </div>
           </div>
-        `);
+        `;
+
+        marker.bindPopup(popupContent, {
+          maxWidth: 280,
+          className: 'custom-popup'
+        });
 
         markersRef.current.push(marker);
       });
 
-      // Draw routes between consecutive uploads
+      // Make viewUploadDetails globally accessible
+      window.viewUploadDetails = (index) => {
+        setViewingUpload(uploads[index]);
+        setCurrentImageIndex(0);
+      };
+
       setRouteLoading(true);
       for (let i = 0; i < uploads.length - 1; i++) {
         const start = uploads[i];
         const end = uploads[i + 1];
         
-        // Fetch actual road route
         const routeCoordinates = await fetchRoute(
           start.latitude,
           start.longitude,
@@ -166,53 +230,11 @@ export default function App() {
             lineCap: 'round'
           }).addTo(mapInstanceRef.current);
 
-          // Add arrow decorator for direction
-          const decorator = window.L.polylineDecorator(route, {
-            patterns: [
-              {
-                offset: '50%',
-                repeat: 0,
-                symbol: window.L.Symbol.arrowHead({
-                  pixelSize: 12,
-                  polygon: false,
-                  pathOptions: {
-                    stroke: true,
-                    weight: 3,
-                    color: lineColor,
-                    opacity: 0.8
-                  }
-                })
-              }
-            ]
-          });
-
           routesRef.current.push(route);
-          
-          // Only add decorator if Leaflet Polyline Decorator is available
-          if (window.L.polylineDecorator) {
-            decorator.addTo(mapInstanceRef.current);
-            routesRef.current.push(decorator);
-          }
-        } else {
-          // Fallback to straight line if routing fails
-          const lineColor = end.status === 'approved' ? '#10b981' : '#ef4444';
-          
-          const fallbackLine = window.L.polyline(
-            [[start.latitude, start.longitude], [end.latitude, end.longitude]],
-            {
-              color: lineColor,
-              weight: 5,
-              opacity: 0.6,
-              dashArray: '15, 10'
-            }
-          ).addTo(mapInstanceRef.current);
-
-          routesRef.current.push(fallbackLine);
         }
       }
       setRouteLoading(false);
 
-      // Fit map bounds to show all markers with padding
       if (uploads.length > 0) {
         const bounds = uploads.map(u => [u.latitude, u.longitude]);
         mapInstanceRef.current.fitBounds(bounds, { 
@@ -225,7 +247,6 @@ export default function App() {
     updateMap();
   }, [uploads]);
 
-  // Calculate straight-line distance (Haversine formula)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371e3;
     const φ1 = (lat1 * Math.PI) / 180;
@@ -241,7 +262,6 @@ export default function App() {
     return R * c;
   };
 
-  // Get current location
   const getCurrentLocation = () => {
     setLoading(true);
     setLocationError('');
@@ -261,33 +281,10 @@ export default function App() {
         setCurrentLocation(coords);
         setLoading(false);
 
-        // Center map on current location
         if (mapInstanceRef.current) {
           mapInstanceRef.current.setView([coords.latitude, coords.longitude], 15);
-          
-          // Add temporary marker for current location
-          const tempMarker = window.L.marker([coords.latitude, coords.longitude], {
-            icon: window.L.divIcon({
-              className: 'current-location-marker',
-              html: `<div style="
-                background-color: #3b82f6;
-                width: 16px;
-                height: 16px;
-                border-radius: 50%;
-                border: 3px solid white;
-                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-                animation: pulse 2s infinite;
-              "></div>`,
-              iconSize: [16, 16],
-              iconAnchor: [8, 8],
-            })
-          }).addTo(mapInstanceRef.current);
-          
-          // Remove after 3 seconds
-          setTimeout(() => tempMarker.remove(), 3000);
         }
 
-        // Check distance from last upload (straight-line distance for validation)
         if (uploads.length > 0) {
           const lastUpload = uploads[uploads.length - 1];
           const dist = calculateDistance(
@@ -297,7 +294,6 @@ export default function App() {
             coords.longitude
           );
           setDistance(dist);
-          // Enforce 150-meter minimum distance rule
           setCanUpload(dist >= 150);
         } else {
           setCanUpload(true);
@@ -316,25 +312,41 @@ export default function App() {
     );
   };
 
-  // Handle file selection
   const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const maxSize = 10 * 1024 * 1024;
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
+
+    const maxSize = 10 * 1024 * 1024;
+    const validFiles = [];
+    
+    for (const file of files) {
       if (file.size > maxSize) {
-        setError('File size must be less than 10MB');
-        setSelectedFile(null);
-        return;
+        setError(`File ${file.name} is too large. Max 10MB per file.`);
+        continue;
       }
-      setSelectedFile(file);
-      setError('');
+      
+      // Create preview URL for images
+      const fileWithPreview = {
+        file: file,
+        preview: URL.createObjectURL(file),
+        name: file.name,
+        size: file.size
+      };
+      validFiles.push(fileWithPreview);
     }
+    
+    setSelectedFiles(validFiles);
+    setError('');
   };
 
-  // Handle upload with strict distance validation
+  const removeFile = (index) => {
+    const newFiles = selectedFiles.filter((_, i) => i !== index);
+    setSelectedFiles(newFiles);
+  };
+
   const handleUpload = () => {
-    if (!selectedFile) {
-      setError('Please select a file first');
+    if (selectedFiles.length === 0) {
+      setError('Please select at least one file');
       return;
     }
 
@@ -343,25 +355,33 @@ export default function App() {
       return;
     }
 
-    // Strict validation: must be at least 150 meters away
     if (!canUpload) {
       setError(`You must be at least 150 meters away from your last upload location. Current distance: ${distance?.toFixed(2)} meters`);
       return;
     }
 
+    if (!remark.trim()) {
+      setError('Please add a remark');
+      return;
+    }
+
     const newUpload = {
       id: Date.now(),
-      fileName: selectedFile.name,
-      fileSize: selectedFile.size,
+      workType: workType,
+      remark: remark,
+      files: selectedFiles,
       latitude: currentLocation.latitude,
       longitude: currentLocation.longitude,
       timestamp: new Date().toISOString(),
-      status: 'pending'
+      status: 'pending',
+      uploadedBy: 'User 1'
     };
 
     setUploads([...uploads, newUpload]);
     
-    setSelectedFile(null);
+    setSelectedFiles([]);
+    setWorkType('Trenching');
+    setRemark('');
     setCurrentLocation(null);
     setDistance(null);
     setCanUpload(false);
@@ -369,7 +389,6 @@ export default function App() {
     document.getElementById('fileInput').value = '';
   };
 
-  // Admin functions
   const approveUpload = (id) => {
     setUploads(uploads.map(upload => 
       upload.id === id ? { ...upload, status: 'approved' } : upload
@@ -382,6 +401,13 @@ export default function App() {
     ));
   };
 
+  const downloadFile = (fileData) => {
+    const link = document.createElement('a');
+    link.href = fileData.preview;
+    link.download = fileData.name;
+    link.click();
+  };
+
   useEffect(() => {
     getCurrentLocation();
   }, []);
@@ -391,15 +417,15 @@ export default function App() {
       <div className="max-w-7xl mx-auto">
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden">
           {/* Header */}
-          <div className="bg-gradient-to-r from-indigo-600 to-blue-600 p-6 text-white">
+          <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="bg-white/20 p-3 rounded-lg">
                   <Navigation className="w-6 h-6" />
                 </div>
                 <div>
-                  <h1 className="text-2xl font-bold">Route-Based Upload Tracker</h1>
-                  <p className="text-sm text-blue-100">Track uploads with real road routing</p>
+                  <h1 className="text-2xl font-bold">SkyFiber</h1>
+                  <p className="text-sm text-blue-100">Upload Tracker with Route Mapping</p>
                 </div>
               </div>
               <button
@@ -450,7 +476,7 @@ export default function App() {
                 )}
               </div>
 
-              {/* Distance Check with strict validation */}
+              {/* Distance Check */}
               {distance !== null && (
                 <div className={`rounded-lg p-4 ${canUpload ? 'bg-green-50 border-2 border-green-200' : 'bg-red-50 border-2 border-red-200'}`}>
                   <div className="flex items-center gap-2">
@@ -471,31 +497,40 @@ export default function App() {
                       ⚠️ Move {(150 - distance).toFixed(2)} more meters to upload
                     </p>
                   )}
-                  {canUpload && (
-                    <p className="text-xs mt-1 text-green-600">
-                      ✓ Distance requirement met! You can upload now.
-                    </p>
-                  )}
                 </div>
               )}
 
-              {/* File Upload */}
+              {/* Work Type Selection */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Select Document
+                  Work Type *
+                </label>
+                <select
+                  value={workType}
+                  onChange={(e) => setWorkType(e.target.value)}
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none transition-colors"
+                >
+                  {WORK_TYPES.map(type => (
+                    <option key={type} value={type}>{type}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* File Upload - Multi Upload */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Upload Images/Documents * (Multiple files allowed)
                 </label>
                 <label className="cursor-pointer block">
                   <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 hover:border-indigo-400 transition-colors">
                     <div className="flex flex-col items-center">
-                      <FileText className="w-8 h-8 text-gray-400 mb-2" />
+                      <ImageIcon className="w-8 h-8 text-gray-400 mb-2" />
                       <p className="text-sm text-gray-600 text-center">
-                        {selectedFile ? selectedFile.name : 'Click to select a file'}
+                        Click to select files
                       </p>
-                      {selectedFile && (
-                        <p className="text-xs text-gray-500 mt-1">
-                          {(selectedFile.size / 1024).toFixed(2)} KB
-                        </p>
-                      )}
+                      <p className="text-xs text-gray-500 mt-1">
+                        Max 10MB per file
+                      </p>
                     </div>
                   </div>
                   <input
@@ -503,9 +538,49 @@ export default function App() {
                     type="file"
                     onChange={handleFileChange}
                     className="hidden"
-                    accept=".pdf,.doc,.docx,.txt,.jpg,.jpeg,.png"
+                    accept="image/*,.pdf,.doc,.docx"
+                    multiple
                   />
                 </label>
+              </div>
+
+              {/* Selected Files Preview */}
+              {selectedFiles.length > 0 && (
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h4 className="text-sm font-semibold text-gray-700 mb-3">Selected Files ({selectedFiles.length})</h4>
+                  <div className="grid grid-cols-2 gap-3">
+                    {selectedFiles.map((fileData, index) => (
+                      <div key={index} className="relative group">
+                        <img 
+                          src={fileData.preview} 
+                          alt={fileData.name}
+                          className="w-full h-24 object-cover rounded-lg"
+                        />
+                        <button
+                          onClick={() => removeFile(index)}
+                          className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                        <p className="text-xs text-gray-600 mt-1 truncate">{fileData.name}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Remark */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Remark *
+                </label>
+                <textarea
+                  value={remark}
+                  onChange={(e) => setRemark(e.target.value)}
+                  placeholder="Add your remark here..."
+                  className="w-full px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-indigo-500 focus:outline-none transition-colors resize-none"
+                  rows="3"
+                />
               </div>
 
               {error && (
@@ -529,9 +604,8 @@ export default function App() {
                 </button>
                 <button
                   onClick={handleUpload}
-                  disabled={!canUpload || !selectedFile || !currentLocation}
+                  disabled={!canUpload || selectedFiles.length === 0 || !currentLocation || !remark.trim()}
                   className="flex-1 bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-                  title={!canUpload && distance ? `Need ${(150 - distance).toFixed(2)} more meters` : ''}
                 >
                   <Upload className="w-5 h-5" />
                   Upload
@@ -553,10 +627,10 @@ export default function App() {
                         <div key={upload.id} className="bg-white rounded-lg p-3 flex items-center justify-between">
                           <div className="flex-1">
                             <p className="text-sm font-semibold text-gray-800">
-                              #{index + 1} - {upload.fileName}
+                              #{index + 1} - {upload.workType}
                             </p>
                             <p className="text-xs text-gray-500">
-                              {new Date(upload.timestamp).toLocaleString()}
+                              {upload.files.length} file(s) • {new Date(upload.timestamp).toLocaleString()}
                             </p>
                             <span className={`text-xs px-2 py-1 rounded-full ${
                               upload.status === 'approved' ? 'bg-green-100 text-green-700' :
@@ -612,39 +686,195 @@ export default function App() {
                 <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                   <div className="flex items-center gap-2">
                     <div className="w-4 h-4 bg-red-500 rounded-full border-2 border-white shadow"></div>
-                    <span className="text-gray-600">Pending Upload</span>
+                    <span className="text-gray-600">Pending</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow"></div>
-                    <span className="text-gray-600">Approved Upload</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-1 bg-red-500" style={{borderStyle: 'dashed'}}></div>
-                    <span className="text-gray-600">Pending Route</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-8 h-1 bg-green-500"></div>
-                    <span className="text-gray-600">Approved Route</span>
+                    <span className="text-gray-600">Approved</span>
                   </div>
                 </div>
-              </div>
-
-              <div className="bg-blue-50 rounded-lg p-4">
-                <p className="text-xs text-blue-800">
-                  <strong>🗺️ Smart Routing:</strong> Routes follow actual roads using OpenStreetMap data. 
-                  Red dashed lines = pending approval. Solid green lines = approved work. 
-                  Strict 150m minimum distance enforced between uploads.
-                </p>
               </div>
             </div>
           </div>
         </div>
       </div>
-      
+
+      {/* View Details Modal */}
+      {viewingUpload && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999] p-4" onClick={() => setViewingUpload(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-6 text-white">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-2xl font-bold">SkyFiber</h2>
+                  <p className="text-sm text-blue-100 mt-1">{viewingUpload.workType}</p>
+                </div>
+                <button
+                  onClick={() => setViewingUpload(null)}
+                  className="bg-white/20 hover:bg-white/30 p-2 rounded-lg transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 h-[calc(90vh-88px)]">
+              {/* Left Sidebar - Thumbnails */}
+              <div className="bg-gray-50 p-4 border-r border-gray-200 overflow-y-auto">
+                <div className="mb-4">
+                  <button
+                    onClick={() => setViewingUpload(null)}
+                    className="flex items-center gap-2 text-gray-600 hover:text-gray-800 text-sm font-medium"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                    Back
+                  </button>
+                </div>
+
+                <h3 className="font-semibold text-gray-700 mb-3 text-sm uppercase tracking-wide">
+                  {viewingUpload.workType}
+                </h3>
+
+                <div className="space-y-2">
+                  {viewingUpload.files.map((fileData, index) => (
+                    <div
+                      key={index}
+                      onClick={() => setCurrentImageIndex(index)}
+                      className={`cursor-pointer rounded-lg overflow-hidden border-2 transition-all ${
+                        currentImageIndex === index
+                          ? 'border-indigo-500 shadow-lg'
+                          : 'border-transparent hover:border-gray-300'
+                      }`}
+                    >
+                      <img
+                        src={fileData.preview}
+                        alt={fileData.name}
+                        className="w-full h-20 object-cover"
+                      />
+                      <div className="bg-white p-2">
+                        <p className="text-xs text-gray-600 truncate">{fileData.name}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Main Content Area */}
+              <div className="col-span-2 flex flex-col overflow-hidden">
+                {/* Image Viewer */}
+                <div className="bg-gray-900 relative flex items-center justify-center h-[60vh] md:h-[60vh] shrink-0 overflow-hidden">
+                  {viewingUpload.files.length > 0 && (
+                    <>
+                      <img
+                        src={viewingUpload.files[currentImageIndex].preview}
+                        alt={viewingUpload.files[currentImageIndex].name}
+                        className="max-h-full max-w-full object-contain"
+                      />
+
+                      {/* Navigation Arrows */}
+                      {viewingUpload.files.length > 1 && (
+                        <>
+                          <button
+                            onClick={() => setCurrentImageIndex((prev) => 
+                              prev === 0 ? viewingUpload.files.length - 1 : prev - 1
+                            )}
+                            className="absolute left-4 bg-white/90 hover:bg-white p-3 rounded-full shadow-lg transition-all"
+                          >
+                            <ChevronLeft className="w-6 h-6 text-gray-800" />
+                          </button>
+                          <button
+                            onClick={() => setCurrentImageIndex((prev) => 
+                              prev === viewingUpload.files.length - 1 ? 0 : prev + 1
+                            )}
+                            className="absolute right-4 bg-white/90 hover:bg-white p-3 rounded-full shadow-lg transition-all"
+                          >
+                            <ChevronRight className="w-6 h-6 text-gray-800" />
+                          </button>
+                        </>
+                      )}
+
+                      {/* Image Counter */}
+                      <div className="absolute top-4 right-4 bg-black/70 text-white px-3 py-1 rounded-full text-sm">
+                        {currentImageIndex + 1} / {viewingUpload.files.length}
+                      </div>
+
+                      {/* Download Button */}
+                      <button
+                        onClick={() => downloadFile(viewingUpload.files[currentImageIndex])}
+                        className="absolute top-4 left-4 bg-white/90 hover:bg-white p-3 rounded-full shadow-lg transition-all"
+                        title="Download"
+                      >
+                        <Download className="w-5 h-5 text-gray-800" />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {/* Details Panel */}
+                <div className="bg-white p-6 border-t border-gray-200 flex-1 overflow-y-auto">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Location</p>
+                      <p className="text-sm font-medium text-gray-800">
+                        Lat - {viewingUpload.latitude.toFixed(4)}° N • Long - {viewingUpload.longitude.toFixed(4)}° E
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Uploaded By</p>
+                      <p className="text-sm font-medium text-gray-800">{viewingUpload.uploadedBy}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Upload Date</p>
+                      <p className="text-sm font-medium text-gray-800">
+                        {new Date(viewingUpload.timestamp).toLocaleDateString('en-US', { 
+                          year: 'numeric', 
+                          month: 'short', 
+                          day: 'numeric' 
+                        })} at {new Date(viewingUpload.timestamp).toLocaleTimeString('en-US', {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        })}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">Status</p>
+                      <span className={`inline-block px-3 py-1 rounded-full text-xs font-semibold ${
+                        viewingUpload.status === 'approved' ? 'bg-green-100 text-green-700' :
+                        viewingUpload.status === 'rejected' ? 'bg-red-100 text-red-700' :
+                        'bg-amber-100 text-amber-700'
+                      }`}>
+                        {viewingUpload.status.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Remark</p>
+                    <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
+                      <p className="text-sm text-gray-800 leading-relaxed">
+                        {viewingUpload.remark}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes pulse {
           0%, 100% { transform: scale(1); opacity: 1; }
           50% { transform: scale(1.2); opacity: 0.8; }
+        }
+        .custom-popup .leaflet-popup-content-wrapper {
+          border-radius: 12px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+        .custom-popup .leaflet-popup-tip {
+          display: none;
         }
       `}</style>
     </div>
